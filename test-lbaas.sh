@@ -11,15 +11,15 @@ SERVER_KEYNAME=${SERVER_KEYNAME:-wendy}
 SERVER_NET=${SERVER_NET:-p3-internal}
 SERVER_SUBNET=${SERVER_SUBNET:-p3-internal}
 
-openstack server show $SERVER_NAME || {
-    openstack server create $SERVER_NAME --image $SERVER_IMAGE --key-name $SERVER_KEYNAME --network $SERVER_NET --flavor $SERVER_FLAVOR --wait
-}
+openstack port show $SERVER_NAME || openstack port create $SERVER_NAME --network $SERVER_NET
+ADDRESS=`openstack port show $SERVER_NAME -c fixed_ips -f json | jq -r ".fixed_ips[0].ip_address"`
+
+openstack server show $SERVER_NAME || openstack server create $SERVER_NAME --image $SERVER_IMAGE --key-name $SERVER_KEYNAME --port $SERVER_NAME --flavor $SERVER_FLAVOR --wait
 openstack server add floating ip $SERVER_NAME $SERVER_FIP
-until curl $SERVER_FIP; do
-    sleep 1
-    ssh -o StrictHostKeyChecking=no centos@$SERVER_FIP "sudo nohup /usr/libexec/platform-python -m http.server 80 &"
+until curl -m1 $SERVER_FIP; do
+    ssh -o StrictHostKeyChecking=no centos@$SERVER_FIP "sudo nohup /usr/libexec/platform-python -m http.server 80" &
+    sleep 10
 done
-ADDRESS=`openstack server show $SERVER_NAME -c addresses -f value | tr '; ' '\n' | grep $SERVER_NET | cut -f2 -d= | cut -f1 -d,`
 
 openstack loadbalancer show $LB_NAME && openstack loadbalancer delete --cascade $LB_NAME
 openstack loadbalancer create --name $LB_NAME --vip-subnet-id $SERVER_SUBNET --wait
@@ -29,4 +29,4 @@ openstack loadbalancer member create --subnet-id $SERVER_SUBNET --address $ADDRE
 
 openstack floating ip set --port `openstack loadbalancer show $LB_NAME -c vip_port_id -f value` $LB_FIP
 
-curl $LB_FIP
+until curl $LB_FIP; do sleep 10; done
